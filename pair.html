@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Pair Device</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f5f5f7;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:2rem;}
+.card{background:#fff;border-radius:20px;padding:2rem;max-width:340px;width:100%;text-align:center;box-shadow:0 4px 24px rgba(0,0,0,.08);}
+h1{font-size:20px;font-weight:700;margin-bottom:6px;}
+p{font-size:14px;color:#666;margin-bottom:1.5rem;line-height:1.5;}
+.code-input{display:flex;gap:10px;justify-content:center;margin-bottom:1.5rem;}
+.code-input input{width:48px;height:56px;text-align:center;font-size:22px;font-weight:700;border:1.5px solid #ddd;border-radius:12px;outline:none;color:#1a1a1a;}
+.code-input input:focus{border-color:#0a84ff;}
+.pair-btn{width:100%;padding:13px;font-size:16px;font-weight:600;background:#0a84ff;color:#fff;border:none;border-radius:12px;cursor:pointer;}
+.pair-btn:disabled{opacity:.4;cursor:not-allowed;}
+.status{font-size:13px;margin-top:12px;min-height:20px;color:#666;}
+.status.ok{color:#30d158;}
+.status.err{color:#ff453a;}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Pair Control Center</h1>
+  <p>Enter the 6-digit code shown on your Control Center app to connect it to Home Assistant.</p>
+  <div class="code-input" id="code-inputs">
+    <input type="text" maxlength="1" inputmode="numeric" />
+    <input type="text" maxlength="1" inputmode="numeric" />
+    <input type="text" maxlength="1" inputmode="numeric" />
+    <input type="text" maxlength="1" inputmode="numeric" />
+    <input type="text" maxlength="1" inputmode="numeric" />
+    <input type="text" maxlength="1" inputmode="numeric" />
+  </div>
+  <button class="pair-btn" id="pair-btn" onclick="pair()" disabled>Pair</button>
+  <div class="status" id="status"></div>
+</div>
+
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+import { getDatabase, ref, update } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js';
+
+const firebaseConfig = {
+  apiKey: "AIzaSyACw0vipuwn3hwOXJP8Wpj9wNUFLQkp2F4",
+  authDomain: "virtual-entities.firebaseapp.com",
+  projectId: "virtual-entities",
+  databaseURL: "https://virtual-entities-default-rtdb.firebaseio.com",
+  storageBucket: "virtual-entities.firebasestorage.app",
+  messagingSenderId: "51646126577",
+  appId: "1:51646126577:web:7ed0c21504bc6faa580c50"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+
+// Auto-focus next input
+const inputs = document.querySelectorAll('.code-input input');
+inputs.forEach((inp, i) => {
+  inp.addEventListener('input', () => {
+    inp.value = inp.value.replace(/[^0-9]/g, '');
+    if (inp.value && i < inputs.length - 1) inputs[i + 1].focus();
+    checkReady();
+  });
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Backspace' && !inp.value && i > 0) inputs[i - 1].focus();
+  });
+});
+
+function checkReady() {
+  const code = getCode();
+  document.getElementById('pair-btn').disabled = code.length < 6;
+}
+
+function getCode() {
+  return Array.from(inputs).map(i => i.value).join('');
+}
+
+// Get HA token via long-lived token from hassio ingress or prompt
+async function getToken() {
+  // Try hassio token first (works inside HA panel)
+  if (window.hassConnection) {
+    return window.hassConnection.options.auth.data.access_token;
+  }
+  // Fallback: ask user to paste token
+  return prompt('Paste your HA long-lived access token:');
+}
+
+window.pair = async function() {
+  const code = getCode();
+  if (code.length < 6) return;
+  const btn = document.getElementById('pair-btn');
+  const status = document.getElementById('status');
+  btn.disabled = true;
+  status.textContent = 'Pairing…';
+  status.className = 'status';
+
+  try {
+    const token = await getToken();
+    if (!token) throw new Error('No token');
+
+    // Get HA URL from current page location
+    const haUrl = window.location.origin;
+
+    await update(ref(db, 'pairings/' + code), {
+      token: token,
+      haUrl: haUrl,
+      paired: true,
+      pairedAt: new Date().toISOString()
+    });
+
+    status.textContent = '✓ Paired! Your app is now connected.';
+    status.className = 'status ok';
+  } catch(e) {
+    status.textContent = 'Failed: ' + (e.message || 'Unknown error');
+    status.className = 'status err';
+    btn.disabled = false;
+  }
+};
+</script>
+</body>
+</html>
